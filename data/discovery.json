@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-09-25T19:30:35+00:00",
+  "results": [
+    {
+      "supplier": "УВМ-Сталь",
+      "website": "https://perm.uvm-steel.ru/company/price_lists/",
+      "checkedAt": "2026-09-25T19:30:27+00:00",
+      "candidateCount": 2,
+      "jev": {
+        "choice": "link_1",
+        "confidence": 0.99,
+        "model": "jev-1.13.0"
+      },
+      "selected": {
+        "url": "https://perm.uvm-steel.ru/company/price_lists/",
+        "text": "Прайс-листы"
+      },
+      "result": "page_review",
+      "visibleFileLinks": [
+        {
+          "url": "https://perm.uvm-steel.ru/catalog/",
+          "text": "Каталог"
+        },
+        {
+          "url": "https://perm.uvm-steel.ru/company/price_lists/",
+          "text": "Прайс-листы"
+        }
+      ],
+      "formMentioned": true
+    },
+    {
+      "supplier": "ГК Луч",
+      "website": "https://perm.luchsteel.ru/",
+      "checkedAt": "2026-09-25T19:30:30+00:00",
+      "candidateCount": 1,
+      "jev": {
+        "choice": "link_0",
+        "confidence": 0.62,
+        "model": "jev-1.13.0"
+      },
+      "selected": {
+        "url": "https://perm.luchsteel.ru/product/",
+        "text": "Каталог"
+      },
+      "result": "page_review",
+      "visibleFileLinks": [
+        {
+          "url": "https://perm.luchsteel.ru/product/",
+          "text": "Каталог"
+        }
+      ],
+      "formMentioned": true
+    },
+    {
+      "supplier": "Платан",
+      "website": "https://platan.perm.ru/",
+      "checkedAt": "2026-09-25T19:30:32+00:00",
+      "candidateCount": 2,
+      "jev": {
+        "choice": "link_1",
+        "confidence": 0.98,
+        "model": "jev-1.13.0"
+      },
+      "selected": {
+        "url": "https://platan.perm.ru/upload/%D0%BF%D1%80%D0%B0%D0%B9%D1%81-%D1%80%D0%B0%D1%81%D1%87%D0%B5%D1%82%20121222.xlsx",
+        "text": "Скачать прайс-лист"
+      },
+      "result": "public_file_candidate"
+    },
+    {
+      "supplier": "Уралпрокат",
+      "website": "https://metallperm59.ru/prajs-list/",
+      "checkedAt": "2026-09-25T19:30:33+00:00",
+      "candidateCount": 1,
+      "jev": {
+        "choice": "link_0",
+        "confidence": 1.0,
+        "model": "jev-1.13.0"
+      },
+      "selected": {
+        "url": "https://metallperm59.ru/prajs-list/",
+        "text": "Прайс-лист"
+      },
+      "result": "page_review",
+      "visibleFileLinks": [
+        {
+          "url": "https://metallperm59.ru/prajs-list/",
+          "text": "Прайс-лист"
+        }
+      ],
+      "formMentioned": true
+    },
+    {
+      "supplier": "БВБ-Альянс",
+      "website": "https://perm.bvb-alyans.ru/",
+      "checkedAt": "2026-09-25T19:30:34+00:00",
+      "candidateCount": 0,
+      "jev": null,
+      "result": "no_public_price_link_selected"
+    }
+  ]
+}
