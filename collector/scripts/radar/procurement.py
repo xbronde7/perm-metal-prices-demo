@@ -87,3 +87,13 @@ def detail_fields(blob, url, tender):
             docs.append({"text":name,"url":None,"status":"link_unavailable"})
     tender["documents"] = docs[:12]
     return tender
+
+
+def merge_documents(existing, incoming):
+    """An actual public URL replaces the same visible but un-downloadable filename."""
+    docs=list(existing)
+    for doc in incoming:
+        match=next((i for i,d in enumerate(docs) if (doc.get("url") and doc.get("url")==d.get("url")) or (text(doc.get("text")) and text(doc.get("text"))==text(d.get("text")))),None)
+        if match is None:docs.append(doc)
+        elif doc.get("url") and not docs[match].get("url"):docs[match]=doc
+    return docs[:12]

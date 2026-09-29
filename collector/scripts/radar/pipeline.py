@@ -16,7 +16,7 @@ import xlrd
 from .documents import extract, links, DATE_RE, FILE_RE, vat_status
 from .domain import attributes, compare_specs, convert, identity, now_iso, number, parse_date, text, unit
 from .jev import Jev
-from .procurement import parse_listing, detail_fields
+from .procurement import parse_listing, detail_fields, merge_documents
 from .transport import Fetcher, error_message
 
 
@@ -81,6 +81,9 @@ def legacy_offers(snapshot):
         source=sources.get(o["supplier"],{})
         rec={**o,"id":identity(o["supplier"],o.get("sourceUrl"),o["name"],o.get("size"),o.get("steelGrade"),o.get("standard")),"supplierName":suppliers.get(o["supplier"],{}).get("name",o["supplier"]),"unit":unit(o.get("unit")),"checkedAt":o.get("checkedAt") or source.get("checkedAt") or snapshot.get("generatedAt"),"priceDate":o.get("priceDate") or source.get("priceDate"),"stockQuantity":o.get("stockQuantity"),"stockUnit":o.get("stockUnit"),"stockStatus":o.get("stockStatus","unknown"),"vat":o.get("vat","unknown"),"region":"Пермский край","regionStatus":"registered","sourceStatus":source.get("status","unknown"),"attributes":attributes(o["name"],o.get("category",""),o),"minOrderQuantity":o.get("minOrderQuantity",5 if "от 5 т" in (o.get("terms") or "") else None),"minOrderUnit":"т" if "от 5 т" in (o.get("terms") or "") else None}
         result.append(rec)
+        if rec["vat"]=="unknown":rec["vat"]=vat_status(o.get("terms") or source.get("terms") or "")
+        if rec.get("minOrderQuantity") is None and "от 5 т" in (source.get("terms") or ""):
+            rec.update(minOrderQuantity=5,minOrderUnit="т")
     return result
 
 
@@ -351,7 +354,7 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     jev=Jev(config.get("maxJevCalls",25))
     report=[];tenders={}
     for feed in config["feeds"]:
-        status={"id":feed["id"],"name":feed["id"],"kind":"procurement","url":feed["url"],"checkedAt":now_iso()}
+        status={"id":feed["id"],"name":feed.get("name",feed["id"]),"kind":"procurement","url":feed["url"],"checkedAt":now_iso()}
         try:
             blob,meta=fetcher.fetch(feed["url"])
             rows=parse_listing(blob,feed["url"],feed.get("region",config["region"]))
@@ -373,6 +376,24 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
         try:
             blob,meta=fetcher.fetch(t["listingUrl"])
             detail_fields(blob,t["listingUrl"],t)
+            primary=t.get("sourceUrl")
+            if primary and urlparse(primary).hostname!=urlparse(t["listingUrl"]).hostname:
+                status={"id":identity(primary),"name":"Первичная площадка закупки № "+t["id"],"kind":"procurement","url":primary,"checkedAt":now_iso()}
+                try:
+                    primary_raw,_=fetcher.fetch(primary)
+                    pages=[(primary,primary_raw)]
+                    document_page=next((l for l in links(primary_raw,primary) if urlparse(l["url"]).hostname==urlparse(primary).hostname and re.fullmatch(r"Документы(?: закупки)?",l["text"],re.I)),None)
+                    if document_page and document_page["url"]!=primary:
+                        document_raw,_=fetcher.fetch(document_page["url"])
+                        pages.append((document_page["url"],document_raw))
+                    for page_url,page_raw in pages:
+                        fields=detail_fields(page_raw,page_url,{"documents":[]})
+                        t["documents"]=merge_documents(t["documents"],fields["documents"])
+                    status.update(status="ok",rows=sum(bool(d.get("url")) for d in t["documents"]))
+                except Exception as exc:
+                    status.update(status="error",error=error_message(exc),rows=0)
+                    t["issues"].append("Первичная площадка: "+error_message(exc))
+                report.append(status)
             for doc in t["documents"]:
                 if not doc.get("url"):continue
                 try:
@@ -404,10 +425,16 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     known=[{"id":s["id"],"name":s["name"],"website":s["website"],"region":config["region"],"regionStatus":"registered"} for s in snapshot.get("suppliers",[]) if s.get("source")!="discovery"]
     known+=config.get("suppliers",[])
     known+=[s for s in store.records("supplier_sites") if s["id"] not in {k["id"] for k in known}]
+    source_terms={s["id"]:s.get("terms") or "" for s in snapshot.get("sources",[])}
+    for site in known:
+        site["priceTerms"]=source_terms.get(site["id"],site.get("priceTerms",""))
     sites=discover_sites(fetcher,config,known,report)
     requirements=[i for t in selected if tender_status(t)=="active" for i in t["items"]]
     for site in sites:
         rows,status=crawl_supplier(fetcher,jev,site,requirements,config)
+        for r in rows:
+            if r.get("minOrderQuantity") is None and "от 5 т" in site.get("priceTerms",""):
+                r.update(minOrderQuantity=5,minOrderUnit="т")
         offers.extend(rows);report.append(status)
         store.db.execute("INSERT INTO supplier_sites(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",(site["id"],json.dumps(site,ensure_ascii=False)))
     store.db.commit()

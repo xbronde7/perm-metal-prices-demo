@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from radar.domain import attributes, compare_specs, convert, unit
 from radar.documents import extract, table_records
 from radar.pipeline import match_item, Store, tender_status
-from radar.procurement import parse_listing
+from radar.procurement import parse_listing, merge_documents
 from radar.transport import RobotsPolicy, Fetcher
 
 
@@ -129,6 +129,17 @@ class IngestionTests(unittest.TestCase):
         data,_=extract(raw,"https://example.com/price.csv")
         self.assertIsNone(data[0]["unit"])
         self.assertEqual(data[0]["stockQuantity"],0)
+
+    def test_document_link_upgrades_unavailable_filename(self):
+        docs=merge_documents([{"text":"ТЗ.xlsx","url":None,"status":"link_unavailable"}],[{"text":"ТЗ.xlsx","url":"https://example.com/tz.xlsx","status":"found"}])
+        self.assertEqual(len(docs),1)
+        self.assertEqual(docs[0]["status"],"found")
+
+    def test_explicit_minimum_applies_to_table_price(self):
+        rows=[["Наименование","Цена руб./т"],["Лист Ст3 10мм",50000]]
+        data=table_records(rows,"https://example.com/p.xls",context="Цены от 5 т, с НДС")
+        self.assertEqual(data[0]["minOrderQuantity"],5)
+        self.assertEqual(data[0]["minOrderUnit"],"т")
 
     def test_actual_event_rows_hidden_positions_and_timezone(self):
         raw=b'''<div itemtype="http://schema.org/Event"><meta itemprop="name" content="Supply metal"><meta itemprop="url" content="https://example.com/l123-1/"><meta itemprop="endDate" content="2026-10-05T06:00:00+03:00"><meta itemprop="price" content="1300000"><div class="card-item__title">x</div></div>'''

@@ -9,16 +9,53 @@
   "maxJevCalls": 25,
   "maxPriceAgeDays": 7,
   "feeds": [
-    {"id":"perm-metal","url":"https://www.b2b-center.ru/search/permskiy-kray/metalloprokat/","adapter":"b2b","region":"Пермский край"},
-    {"id":"perm-metals","url":"https://www.b2b-center.ru/search/permskiy-kray/metally-i-metalloizdeliya/","adapter":"b2b","region":"Пермский край"},
-    {"id":"perm-live","url":"https://www.b2b-center.ru/search-tender/regions-perm/?go_mobile=0","adapter":"b2b","region":"Пермский край"}
+    {
+      "id": "perm-metal",
+      "url": "https://www.b2b-center.ru/search/permskiy-kray/metalloprokat/",
+      "adapter": "b2b",
+      "region": "Пермский край",
+      "name": "B2B-Center — металлопрокат"
+    },
+    {
+      "id": "perm-metals",
+      "url": "https://www.b2b-center.ru/search/permskiy-kray/metally-i-metalloizdeliya/",
+      "adapter": "b2b",
+      "region": "Пермский край",
+      "name": "B2B-Center — металлы и изделия"
+    },
+    {
+      "id": "perm-live",
+      "url": "https://www.b2b-center.ru/search-tender/regions-perm/?go_mobile=0",
+      "adapter": "b2b",
+      "region": "Пермский край",
+      "name": "B2B-Center — текущие закупки края"
+    }
   ],
-  "directories": ["https://www.rspm.ru/ru/members/map/?r=54"],
+  "directories": [
+    "https://www.rspm.ru/ru/members/map/?r=54"
+  ],
   "suppliers": [
-    {"id":"kvin","name":"КВИН — кабельный сервисный центр","website":"https://kvin.ru/cable/price-list/","region":"Пермский край","adapter":"kvin","regionStatus":"registered"},
-    {"id":"kammarket","name":"Камкабель — магазин","website":"https://www.kamkabel.market/","region":"Пермский край","regionStatus":"registered"}
+    {
+      "id": "kvin",
+      "name": "КВИН — кабельный сервисный центр",
+      "website": "https://kvin.ru/cable/price-list/",
+      "region": "Пермский край",
+      "adapter": "kvin",
+      "regionStatus": "registered"
+    },
+    {
+      "id": "kammarket",
+      "name": "Камкабель — магазин",
+      "website": "https://www.kamkabel.market/",
+      "region": "Пермский край",
+      "regionStatus": "registered"
+    }
   ],
-  "searchQueries": ["Пермь металлопрокат прайс скачать", "Пермь кабель прайс остатки", "Пермский край поставщик металл кабель каталог цены"],
+  "searchQueries": [
+    "Пермь металлопрокат прайс скачать",
+    "Пермь кабель прайс остатки",
+    "Пермский край поставщик металл кабель каталог цены"
+  ],
   "searchProvider": "searxng",
   "searchEndpointEnv": "SEARXNG_URL",
   "scopeNote": "Обход подключённых источников и найденных сайтов. Полнота всех сайтов Пермского края не подтверждена."

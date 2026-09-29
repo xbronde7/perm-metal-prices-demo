@@ -111,6 +111,9 @@ def table_records(rows, url, mode="offer", context=""):
         rec = {"id":identity(url,line_no,full_name),"name":full_name,"category":category,"quantity":qty,"unit":u,"price":price,"sourceUrl":url,"evidence":f"Строка {line_no+1}","vat":vat_status(context),"priceDate":price_date[0] if price_date else None,"sku":cell("sku") or None}
         rec["attributes"] = attributes(full_name,category)
         if mode == "offer":
+            minimum=re.search(r"(?:от|партия(?:\s+от)?)\s*(\d+(?:[.,]\d+)?)\s*(т|кг|км|м|шт)\b",context,re.I)
+            if minimum:
+                rec["minOrderQuantity"]=number(minimum[1]);rec["minOrderUnit"]=unit(minimum[2])
             rec["stockQuantity"] = qty
             rec["stockUnit"] = u if qty is not None else None
             rec["stockStatus"] = "reported" if qty is not None else "unknown"
