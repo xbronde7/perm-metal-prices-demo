@@ -1,0 +1,80 @@
+name: Collect procurement and publish radar
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'shared/**', 'collector/**', '.github/workflows/**', 'data/**']
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: perm-radar-pages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: collector/scripts/requirements.txt
+      - name: Install document readers
+        run: pip install -r collector/scripts/requirements.txt
+      - name: Verify quantity and specification rules
+        run: python -m unittest discover -s collector/scripts/tests -v
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .radar-state
+            data/deals.json
+            data/snapshot.json
+          key: radar-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: radar-state-
+      - name: Collect public tenders, supplier prices and stock
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          TYPESAFE_MODEL: jev-1.13.0
+          SEARXNG_URL: ${{ secrets.SEARXNG_URL }}
+        run: >-
+          python collector/scripts/run_radar.py once
+          --config collector/radar.config.json
+          --snapshot data/snapshot.json
+          --output data/deals.json
+          --state .radar-state
+          --scheduler github_actions
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Prepare current data
+        run: |
+          mkdir -p web/public/data
+          cp data/*.json web/public/data/
+      - name: Check and build dashboard
+        working-directory: web
+        run: |
+          npm run check
+          npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+      - name: Publish updated dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
