@@ -17,6 +17,7 @@ from .documents import extract, links, DATE_RE, FILE_RE, vat_status
 from .domain import attributes, compare_specs, convert, identity, now_iso, number, parse_date, text, unit
 from .jev import Jev
 from .procurement import parse_listing, detail_fields, merge_documents
+from .demand import collect_feed, public_details
 from .transport import Fetcher, error_message
 
 
@@ -39,6 +40,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, payload TEXT);
         CREATE TABLE IF NOT EXISTS supplier_sites (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS observations (kind TEXT, id TEXT, observed_at TEXT, digest TEXT, payload TEXT, UNIQUE(kind,id,digest));
+        CREATE TABLE IF NOT EXISTS demand_changes (id TEXT PRIMARY KEY, first_seen TEXT, changed_at TEXT, facts TEXT, changes TEXT);
         """)
         self.db.commit()
 
@@ -61,6 +63,28 @@ class Store:
     def close(self):
         self.db.close()
 
+    def track_demand(self, record):
+        """Track source facts, not poll times, match scores or transient HTTP failures."""
+        fields={k:record.get(k) for k in ("title","buyer","deadline","budget","reportedArchived","plannedPeriod","description")}
+        fields["items"]=[{k:i.get(k) for k in ("name","quantity","unit","sourceUrl")} for i in record.get("items",[])]
+        fields["documents"]=[{k:d.get(k) for k in ("text","url","sha256")} for d in record.get("documents",[])]
+        encoded=json.dumps(fields,ensure_ascii=False,sort_keys=True)
+        prior=self.db.execute("SELECT first_seen,changed_at,facts,changes FROM demand_changes WHERE id=?",(record["id"],)).fetchone()
+        now=record["checkedAt"]
+        if prior:
+            first,changed,old,changes=prior
+            events=json.loads(changes)
+            if old!=encoded:
+                labels={"title":"Название","buyer":"Заказчик","deadline":"Срок подачи","budget":"Бюджет","reportedArchived":"Статус площадки","plannedPeriod":"Период плана","description":"Описание","items":"Позиции и количества","documents":"Документы"}
+                previous=json.loads(old)
+                events=[{"at":now,"fields":[labels[k] for k in fields if previous.get(k)!=fields[k]]}]+events
+                changed=now
+        else:
+            observed=self.db.execute("SELECT min(observed_at) FROM observations WHERE kind='tenders' AND id=?",(record["id"],)).fetchone()[0]
+            first=observed or now;changed=None;events=[]
+        self.db.execute("INSERT INTO demand_changes VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET changed_at=excluded.changed_at,facts=excluded.facts,changes=excluded.changes",(record["id"],first,changed,encoded,json.dumps(events[:10],ensure_ascii=False)))
+        record.update(firstSeenAt=first,lastChangedAt=changed,changes=events[:10])
+
 
 def tender_status(t, now=None):
     now=now or datetime.now(timezone.utc)
@@ -70,6 +94,9 @@ def tender_status(t, now=None):
     seen=parse_date(t.get("checkedAt"))
     if t.get("sourceStatus")!="ok" or not seen or now-seen>timedelta(hours=24):
         return "needs_update"
+    if t.get("noticeKind")=="plan":
+        end=parse_date(t.get("plannedEnd"))
+        return "closed" if end and end<now else "planned"
     return "active" if deadline else "unknown_deadline"
 
 
@@ -353,29 +380,35 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     fetcher=Fetcher(state_dir/"raw",max_requests=config.get("maxRequests",180))
     jev=Jev(config.get("maxJevCalls",25))
     report=[];tenders={}
+    prior_tenders={t["id"]:t for t in store.records("tenders")}
     for feed in config["feeds"]:
         status={"id":feed["id"],"name":feed.get("name",feed["id"]),"kind":"procurement","url":feed["url"],"checkedAt":now_iso()}
         try:
-            blob,meta=fetcher.fetch(feed["url"])
-            rows=parse_listing(blob,feed["url"],feed.get("region",config["region"]))
-            if not rows:raise ValueError("Нет распознанных закупок; источник требует проверки")
+            rows,meta,note=collect_feed(fetcher,{"region":config["region"],**feed})
             for t in rows:
                 t["sourceDigest"]=meta["sha256"]
                 prior=tenders.get(t["id"])
                 if not prior or len(t["items"])>len(prior["items"]):tenders[t["id"]]=t
-            status.update(status="ok",rows=len(rows))
+            status.update(status="ok",rows=len(rows),note=note,adapter=feed.get("adapter"),access=feed.get("access"),scope=feed.get("scope"))
         except Exception as exc:
             status.update(status="error",error=error_message(exc),rows=0)
         report.append(status)
     # Active deadlines first; preserve closed/unknown entries for inspection.
     selected=sorted(tenders.values(),key=lambda t:(tender_status(t)!="active",t.get("deadline") or "9999"))[:config.get("maxTenders",25)]
-    details=0
+    details=0;detail_feeds={}
+    feed_count=max(1,len({t.get("feedId") for t in selected if t.get("noticeKind")!="plan"}))
+    per_feed=max(1,(config.get("maxDetailPages",20)+feed_count-1)//feed_count)
     for t in selected:
+        if t.get("noticeKind")=="plan":continue
         if details>=config.get("maxDetailPages",12):break
+        if detail_feeds.get(t.get("feedId"),0)>=per_feed:continue
         details+=1
+        detail_feeds[t.get("feedId")]=detail_feeds.get(t.get("feedId"),0)+1
         try:
             blob,meta=fetcher.fetch(t["listingUrl"])
             detail_fields(blob,t["listingUrl"],t)
+            public_details(blob,t["listingUrl"],t)
+            t["documentsCheckedAt"]=now_iso()
             primary=t.get("sourceUrl")
             if primary and urlparse(primary).hostname!=urlparse(t["listingUrl"]).hostname:
                 status={"id":identity(primary),"name":"Первичная площадка закупки № "+t["id"],"kind":"procurement","url":primary,"checkedAt":now_iso()}
@@ -413,12 +446,21 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     prior_tenders={t["id"]:t for t in store.records("tenders")}
     for t in selected:
         prior=prior_tenders.get(t["id"])
+        if t.get("category")=="Прочее":
+            cached=prior and prior.get("title")==t["title"] and prior.get("categoryModel")
+            classified=prior.get("category") if cached else jev.classify_notice(t["title"])
+            if classified:t.update(category=classified,categoryModel=prior["categoryModel"] if cached else jev.model)
+        if prior and t.get("noticeKind")!="plan" and not t.get("documentsCheckedAt"):
+            t["documents"]=prior.get("documents",[])
+            t["documentsCheckedAt"]=prior.get("documentsCheckedAt")
         if prior and not any(i.get("quantity") for i in t["items"]) and any(i.get("quantity") for i in prior.get("items",[])):
             t["items"]=prior["items"]
             t["issues"].append("Позиции сохранены из предыдущего разбора; сверить обновление документа")
+        store.track_demand(t)
     store.save("tenders",selected)
     snapshot=json.loads(snapshot_path.read_text(encoding="utf-8")) if snapshot_path.exists() else {"offers":[],"sources":[],"suppliers":[]}
-    if refresh_prices:
+    prices_enabled=config.get("collectSupplierPrices",True)
+    if refresh_prices and prices_enabled:
         refresh_price_files(fetcher,snapshot,report)
         atomic_json(snapshot_path,snapshot)
     offers=legacy_offers(snapshot)
@@ -428,7 +470,7 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     source_terms={s["id"]:s.get("terms") or "" for s in snapshot.get("sources",[])}
     for site in known:
         site["priceTerms"]=source_terms.get(site["id"],site.get("priceTerms",""))
-    sites=discover_sites(fetcher,config,known,report)
+    sites=discover_sites(fetcher,config,known,report) if prices_enabled else []
     requirements=[i for t in selected if tender_status(t)=="active" for i in t["items"]]
     for site in sites:
         rows,status=crawl_supplier(fetcher,jev,site,requirements,config)
@@ -464,6 +506,7 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
     for o in all_offers:index.setdefault(o["attributes"].get("family"),[]).append(o)
     evaluated=[]
     for t in store.records("tenders"):
+        if re.search(r"Объявление о продаже",t["title"],re.I):continue
         if t["id"] not in {x["id"] for x in selected}:
             t["sourceStatus"]="stale"
             t["issues"]=list(dict.fromkeys(t.get("issues",[])+["Закупка не найдена в текущем обходе; требуется обновление источника"]))
@@ -473,7 +516,7 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
         cost_vat=set()
         for i in t["items"]:
             i["attributes"]=attributes(i["name"])
-            i["matches"]=match_item(i,index.get(i["attributes"].get("family"),[]),config.get("maxPriceAgeDays",7))
+            i["matches"]=match_item(i,index.get(i["attributes"].get("family"),[]),config.get("maxPriceAgeDays",7)) if prices_enabled else []
             if i["matches"]:
                 matched+=1
                 top=i["matches"][0]
@@ -491,7 +534,7 @@ def _run(config,snapshot_path,output,state_dir,refresh_prices,store,run_id,start
         evaluated.append(t)
     evaluated.sort(key=lambda t:(t["status"]!="active",-t["specifiedItems"],-t["matchedItems"],t.get("deadline") or "9999"))
     finished=now_iso()
-    result={"schemaVersion":1,"generatedAt":finished,"startedAt":started,"region":config["region"],"scope":config["scopeNote"],"intervalMinutes":config.get("intervalMinutes",240),"automation":{"mode":"collector","lastRunAt":finished,"nextRunAt":(datetime.now(timezone.utc)+timedelta(minutes=config.get("intervalMinutes",240))).isoformat(),"scheduler":"external_or_service"},"metrics":{"tenders":len(evaluated),"active":sum(t["status"]=="active" for t in evaluated),"withOffers":sum(t["status"]=="active" and t["matchedItems"]>0 for t in evaluated),"needsDocuments":sum(t["status"]=="active" and t["readiness"]=="needs_documents" for t in evaluated),"supplierSites":len(sites),"offers":len(all_offers),"reportedStock":sum(o.get("stockQuantity") is not None for o in all_offers),"successfulSources":sum(s["status"]=="ok" for s in report),"sourceCount":len(report)},"jev":{"configured":bool(jev.key),"model":jev.model,"calls":jev.calls,"errors":jev.errors},"tenders":evaluated,"sources":report,"supplierSites":sites,"stockOffers":[{k:o.get(k) for k in ("id","name","supplierName","price","unit","stockQuantity","stockUnit","stockCity","sourceUrl","stockSourceUrl","checkedAt","priceDate","attributes")} for o in all_offers if o.get("stockQuantity") is not None][:2000]}
+    result={"schemaVersion":2,"productMode":"demand_monitor","pricesEnabled":prices_enabled,"generatedAt":finished,"startedAt":started,"region":config["region"],"scope":config["scopeNote"],"intervalMinutes":config.get("intervalMinutes",240),"automation":{"mode":"collector","lastRunAt":finished,"nextRunAt":(datetime.now(timezone.utc)+timedelta(minutes=config.get("intervalMinutes",240))).isoformat(),"scheduler":"external_or_service"},"metrics":{"tenders":len(evaluated),"plans":sum(t["status"]=="planned" for t in evaluated),"requests":sum(t.get("noticeKind")=="request" for t in evaluated),"new":sum(bool(t.get("firstSeenAt") and datetime.now(timezone.utc)-parse_date(t["firstSeenAt"])<timedelta(hours=24)) for t in evaluated),"active":sum(t["status"]=="active" for t in evaluated),"withOffers":sum(t["status"]=="active" and t["matchedItems"]>0 for t in evaluated),"needsDocuments":sum(t["status"]=="active" and t["readiness"]=="needs_documents" for t in evaluated),"supplierSites":len(sites),"offers":len(all_offers),"reportedStock":sum(o.get("stockQuantity") is not None for o in all_offers),"successfulSources":sum(s["status"]=="ok" for s in report),"sourceCount":len(report)},"jev":{"configured":bool(jev.key),"model":jev.model,"calls":jev.calls,"errors":jev.errors},"tenders":evaluated,"sources":report,"supplierSites":sites,"stockOffers":[{k:o.get(k) for k in ("id","name","supplierName","price","unit","stockQuantity","stockUnit","stockCity","sourceUrl","stockSourceUrl","checkedAt","priceDate","attributes")} for o in all_offers if o.get("stockQuantity") is not None][:2000]}
     atomic_json(output,result)
     store.db.execute("UPDATE runs SET finished_at=?,payload=? WHERE id=?",(finished,json.dumps({"metrics":result["metrics"],"sources":report},ensure_ascii=False),run_id));store.db.commit()
     print(json.dumps({"output":str(output),"metrics":result["metrics"],"jev":result["jev"]},ensure_ascii=False),flush=True)

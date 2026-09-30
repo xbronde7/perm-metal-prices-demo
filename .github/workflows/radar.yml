@@ -43,7 +43,7 @@ jobs:
             data/snapshot.json
           key: radar-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: radar-state-
-      - name: Collect public tenders, supplier prices and stock
+      - name: Collect public procurement, buyer requests and plans
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           TYPESAFE_MODEL: jev-1.13.0

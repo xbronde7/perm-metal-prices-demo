@@ -17,13 +17,13 @@ def item(name, quantity, measure, url, index):
     return {"id":identity(url,index,name),"name":text(name),"quantity":quantity if quantity is not None and quantity > 0 else None,"unit":unit(measure),"attributes":attributes(name),"sourceUrl":url,"evidence":f"Позиция {index}","matches":[]}
 
 
-def parse_listing(blob, url, region="Пермский край"):
+def parse_listing(blob, url, region="Пермский край", scope="materials"):
     soup = BeautifulSoup(blob,"html.parser")
     result = []
     for card in soup.select('[itemtype="http://schema.org/Event"]'):
         meta = lambda k: (card.select_one(f'meta[itemprop="{k}"]').get("content") if card.select_one(f'meta[itemprop="{k}"]') else None)
         title, detail = meta("name"), meta("url")
-        if not title or not detail or not MATERIAL.search(title):
+        if not title or not detail or scope!="all" and not MATERIAL.search(title):
             continue
         tags = card.select_one(".card-item__tag-container")
         if tags and re.search(r"Продажа|Договор|Контракт",tags.get_text()):
@@ -46,24 +46,35 @@ def parse_listing(blob, url, region="Пермский край"):
     # The marketplace's live regional list uses a simpler table.
     if not result:
         for a in soup.select('a[href*="/tender-"]'):
-            title = a.get_text(" ",strip=True)
-            if not MATERIAL.search(title):
+            desc=a.select_one(".search-results-title-desc")
+            kind=a.select_one(".search-results-title-type")
+            procedure=kind.get_text(" ",strip=True) if kind else ""
+            if "Объявление о продаже" in procedure:continue
+            if desc:
+                copy=BeautifulSoup(str(desc),"html.parser")
+                for label in copy.select(".search-results-title-type"):label.decompose()
+                title=copy.get_text(" ",strip=True)
+            else:title = a.get_text(" ",strip=True)
+            if scope!="all" and not MATERIAL.search(title):
                 continue
             target = urljoin(url,a["href"])
             num = re.search(r"tender-(\d+)",target)
             if not num:
                 continue
             row = a.find_parent("tr")
+            cells=row.find_all("td",recursive=False) if row else []
+            buyer=cells[1].get_text(" ",strip=True) if len(cells)>1 else None
             dates = re.findall(r"\d{2}\.\d{2}\.20\d{2}\s+\d{2}:\d{2}",row.get_text(" ") if row else "")
             deadline = parse_date(dates[-1],MOSCOW) if dates else None
-            result.append({"id":num[1],"title":title,"buyer":None,"region":region,"sourceUrl":target,"listingUrl":target,"feedUrl":url,"publishedAt":None,"deadline":deadline.isoformat() if deadline else None,"budget":None,"budgetVat":"unknown","items":[],"documents":[],"checkedAt":now_iso(),"sourceStatus":"ok","issues":[],"paymentTerms":None,"deliveryTerms":None})
+            published=parse_date(dates[0],MOSCOW) if len(dates)>1 else None
+            result.append({"id":num[1],"title":title,"buyer":buyer,"procedure":procedure,"region":region,"sourceUrl":target,"listingUrl":target,"feedUrl":url,"publishedAt":published.isoformat() if published else None,"deadline":deadline.isoformat() if deadline else None,"budget":None,"budgetVat":"unknown","items":[],"documents":[],"checkedAt":now_iso(),"sourceStatus":"ok","issues":[],"paymentTerms":None,"deliveryTerms":None})
     return list({r["id"]:r for r in result}.values())
 
 
 def detail_fields(blob, url, tender):
     soup = BeautifulSoup(blob,"html.parser")
     h1=soup.select_one("h1")
-    if h1 and "market" in url:
+    if h1 and not tender.get("title") and "market" in url:
         tender["title"]=text(h1.get_text())
     content = soup.get_text(" ",strip=True)
     for label,key in [("Условия оплаты","paymentTerms"),("Условия поставки","deliveryTerms"),("Адрес места поставки","deliveryAddress")]:

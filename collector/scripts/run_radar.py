@@ -49,6 +49,9 @@ class Collector:
                 fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 result=run(self.args.config,self.args.snapshot,self.args.output,self.args.state,not self.args.skip_prices)
                 result["automation"]["mode"]="scheduled_service" if self.args.command=="serve" else self.args.scheduler
+                if self.args.scheduler=="github_actions":
+                    # Scheduled starts (UTC) need not coincide with collection completion.
+                    result["automation"].update(nextRunAt=None,scheduler="github_actions",schedule="17 */4 * * * UTC")
                 atomic_json(self.args.output,result)
             self.status["lastFinishedAt"]=now_iso()
             return True

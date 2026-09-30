@@ -1,9 +1,9 @@
 {
   "region": "Пермский край",
   "intervalMinutes": 240,
-  "maxRequests": 180,
-  "maxTenders": 25,
-  "maxDetailPages": 12,
+  "maxRequests": 150,
+  "maxTenders": 200,
+  "maxDetailPages": 20,
   "pagesPerSupplier": 3,
   "maxSupplierSites": 24,
   "maxJevCalls": 25,
@@ -14,21 +14,46 @@
       "url": "https://www.b2b-center.ru/search/permskiy-kray/metalloprokat/",
       "adapter": "b2b",
       "region": "Пермский край",
-      "name": "B2B-Center — металлопрокат"
-    },
-    {
-      "id": "perm-metals",
-      "url": "https://www.b2b-center.ru/search/permskiy-kray/metally-i-metalloizdeliya/",
-      "adapter": "b2b",
-      "region": "Пермский край",
-      "name": "B2B-Center — металлы и изделия"
+      "name": "B2B-Center — металлопрокат",
+      "scope": "materials",
+      "access": "Карточки открыты; доступ к документации проверяется отдельно"
     },
     {
       "id": "perm-live",
       "url": "https://www.b2b-center.ru/search-tender/regions-perm/?go_mobile=0",
       "adapter": "b2b",
       "region": "Пермский край",
-      "name": "B2B-Center — текущие закупки края"
+      "name": "B2B-Center — текущие закупки края",
+      "scope": "all",
+      "access": "Карточки открыты; доступ к документации проверяется отдельно"
+    },
+    {
+      "id": "synapse-perm",
+      "name": "Синапс — закупки Пермского края",
+      "adapter": "synapse",
+      "url": "https://synapsenet.ru/search/regions/permskij-kraj",
+      "region": "Пермский край",
+      "scope": "all",
+      "pages": 4,
+      "access": "Карточки открыты; часть документов, контактов и первичных ссылок требуют регистрации"
+    },
+    {
+      "id": "pzsp",
+      "name": "ПЗСП — планы и тендеры",
+      "adapter": "pzsp",
+      "url": "https://pzsp.ru/tendery/",
+      "region": "Пермский край",
+      "scope": "all",
+      "access": "План и список действующих процедур открыты"
+    },
+    {
+      "id": "supl-perm",
+      "name": "Supl.biz — запросы покупателей Перми",
+      "adapter": "supl",
+      "url": "https://supl.biz/orders/perm-region362/",
+      "region": "Пермский край",
+      "scope": "all",
+      "access": "Публичные запросы; последние 24 часа и контакты требуют входа"
     }
   ],
   "directories": [
@@ -58,5 +83,6 @@
   ],
   "searchProvider": "searxng",
   "searchEndpointEnv": "SEARXNG_URL",
-  "scopeNote": "Обход подключённых источников и найденных сайтов. Полнота всех сайтов Пермского края не подтверждена."
+  "scopeNote": "Все категории закупок: товары, услуги и подрядные работы. Подключены B2B-Center, 4 страницы региональной ленты Синапс, запросы покупателей Перми Supl.biz и план ПЗСП на 120 дней. Это ограниченный обход источников, полнота рынка не подтверждена. Цены поставщиков в этом режиме не собираются.",
+  "collectSupplierPrices": false
 }
